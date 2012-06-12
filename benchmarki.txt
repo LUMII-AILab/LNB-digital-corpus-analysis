@@ -1,0 +1,77 @@
+GHC kompilatora settingi
+
+tests: LNB_transform_source - ALTO xml lasīšana un datu izvilkšana no turienes; pirmie 20 METS faili no saraksta.
+	caur Sublime/runhaskell : 600sec
+	nokompileets tiirs ar -O : 500 sec
+(*)	ar paraleelo MapM un 4-core izpildīšanu : 400 sec
+ 		ghc --make -O -feager-blackholing -threaded -rtsopts -fforce-recomp LNB_transform_source.hs
+ 		 ./LNB_transform_source +RTS -N4
+	ar -N8 : leeni, 800+
+	ar -N4 un bez eager-blackholing un bez paraleelaa MapM - leeni, 600+
+tests2: LNB_transform_source, 4 faili, ALTO xml lasiishana + arii morfoanaliize
+	Sublime/runhaskell;  visi paraleeli, katrs ar savu morfoanlizatori : 159s
+	Sublime/runhaskell;  visi viens peec otra, katrs ar savu morfoanalizatoru : 194s
+	no komandrindas ar vienthreada -O (paraleels MapM, n analizatori) : 146s
+(*)	no komandrindas ar threadoto -N4 : 142s
+	Sublime/runhaskell; visi paraleeli bet ar vienu morfoanalizatoru : 187s
+tests3: LNB_transform_source, 40 Kaupeena faili, ALTO xml lasiishana + morfoanaliize
+	1 thread, Sublime/runhaskell : 182-186s
+	4 thread, Sublime/runhaskell : 129s
+	4 thread, GHC ar -N4 : 98s
+	Pēc java izmaiņām - 4 thread, Sublime/runhaskell : 130-135s
+
+XML parsera settingi
+tests: tas pats
+(*)	defaultie HXT settingi - vislabaak
+	ar tagsoup_XML - apmeeram 1.5x ilgaak
+?	jaapameegjina - tiirs regex parse, ja saakotneejaa xml paarveidoshana kjeedee aiznjem paaraak daudz laika - un tas vareetu prasiit kaadu nedeelju...
+
+String buildoshanas veids
+	parastais : ~22 sec
+	Text klase : ~22 sec
+	Blaze Bystestring builder : ~22 sec
+(*) dominee xml parse laiks; ja kautkur buus kritiski shie string buildoshana, tad var paartesteet ar TagSoup1.2.3 modulii ParseMETS
+
+Morfologjija - testeejam uz 124 lpp lielu aviizi modernajaa drukaa
+	cheapanalyze (kas neanalizee) : 7.5 sec
+	localhost webservice : 95 sec
+	remote webservice : 441 sec   [remote dators gan ir vaajaaks/leenaaks nekaa mans]
+	pipe-risinaajums : 30 sec
+
+
+
+XML ielasiishana - testeejam uz Kaupeena burtniicinjaam. 1 thread, sublime/runhaskell. (tur acīmredzot ir tikai metadati nevis saturs)
+	HXT risinaajums - 8.8-9.8 sec
+	HExpat-SAX risinājums - 0.5 sec
+	HExpat-SAX risinājums ar UTF8 stringiem - 0.65 sec
+
+XML ielasiishana atkal - ir jaunie morfologjijas uzlabojumi; Sublime/runhaskell, 4x thread, uz kaupeena-40 datiem
+	HXT risinaajums:  99s
+
+
+XML ielasiishana ALTO - failedValidation_batch1/g_001_0300037074/0300037074_text.xml apstraade. 1 thread, sublime/runhaskell
+	esoshais risinaajums : 59s
+	ar SAX : 24s
+
+</g> taga nochekoshana un salikshana; tests: meernieku laiki
+	bez taa : 27s
+	ar to : 27s
+
+Atkal GHC kompilatora settingi.  Analiize pirmajiem 40 failiem
+	4 thread, sublime/runhaskell : fail, iziet nepabeidzot
+	4 thread, ghc -N4 : 18-22s, ja nenocrasho
+
+Pēc Steve labojumiem hexpat : pirmie 40 kaupēna faili
+	4 thread, sublime/runhaskell : 47s
+	4 thread, ghc -N4 : 18s
+	3 thread, ghc -N3 : 16.8s
+	2 thread, ghc -N2 : 17s
+	1 thread : 23s	
+	5 thread, ghc -N5 : 20s
+
+Morfokešošanas ieslēgšanas test : pirmie 40 kaupēna faili
+	3 thread, sublime/runhaskell, no morpho (cheapanalyze) : 13s
+	3 thread, sublime/runhaskell, cache = 0 : 29.6s
+	3 thread, sublime/runhaskell, cache = 1 000 : 30.63s
+	3 thread, sublime/runhaskell, cache = 10 000 : 29.3s
+	3 thread, sublime/runhaskell, cache = 100 000 : 30.78s
