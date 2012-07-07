@@ -75,3 +75,18 @@ Morfokešošanas ieslēgšanas test : pirmie 40 kaupēna faili
 	3 thread, sublime/runhaskell, cache = 1 000 : 30.63s
 	3 thread, sublime/runhaskell, cache = 10 000 : 29.3s
 	3 thread, sublime/runhaskell, cache = 100 000 : 30.78s
+
+Tokenu skaitīšanas efekts un kopējā ātrdarbība 3 thread, ghc.
+	Pirmie 100 dokumenti: 573s.  9.2M tokenu, 16k tokeni/s
+	Tas pats ar atslēgtu debuginfo: 540s
+	Citi 100 dokumenti: 12.7s. 300k tokenu, 24k tokeni/s
+	Citi 200 dokumenti: 141s. 1.5m tokenu, 10k tokeni/s
+	production run, pirmie 1150 doki: stunda. 18m tokenu, 5k tokeni/s - BAD!
+	200 dokumenti no 242000. ghc, n3: 441s. 4m tokenu, 9k tokeni/s
+	tie paši dokumenti 2 porcijās. 436s. 4m tokenu, 9k tokeni/s
+	tas pats uz 4 thread: 429s. 
+	tas pats ar 10k cache nevis defaulto 100k: 422s. 4m tokenu, 9.5 tokeni/s
+	tas pats ar failu rasktīšanu caur Data.Text lib, nevis stringiem: 428s3
+	... ar lielāku pārnesi uz Data.Text library: 408s
+	pamainīts xmlescape: 412s...
+	pamainīta java uz tabseparated output: 134s !!!

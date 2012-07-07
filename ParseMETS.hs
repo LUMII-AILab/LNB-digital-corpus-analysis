@@ -1,7 +1,7 @@
 {-# LANGUAGE Arrows #-}
 {-# LANGUAGE OverloadedStrings #-}
 module ParseMETS
-(getMETSDocument, documentTagSoupXML, documentTagSoupXML3, documentVertXML, documentPlaintext, documentMetadata, docTokens, stripPages, emptydoc, Document(Document), pages, docId, title, issueDate, dType, language, label) where
+(getMETSDocument, documentTagSoupXML, documentTagSoupXML3, documentVertXML, documentVertXML_T, documentStanfordVert, documentPlaintext, documentMetadata, docTokens, stripPages, emptydoc, Document(Document), pages, docId, title, issueDate, dType, language, label) where
 
 import Data.String.Utils
 import Morphology
@@ -89,12 +89,12 @@ processPages :: Document -> IO Document
 processPages doc = do
     pages <- mapM getALTOPage $ pagenames doc
     return doc{pages = pages}
-    --return doc{pages = []}   Priekš metadatu ģenerēšanas
+    --return doc{pages = []}  -- Priekš metadatu ģenerēšanas
 
 postProcess :: Document -> Document
 postProcess doc = 
     let oldDate = take 8 $ issueDate doc
-    in doc{ issueDate = oldDate ++ take (8 - length oldDate) (repeat '0')}
+    in doc{ issueDate = oldDate ++ take (8 - length oldDate) (repeat '0'), title = xmlEscape $ title doc, label = xmlEscape $ title doc}
 
 stripPages :: Document -> Document
 stripPages doc = doc {pages = []} 
@@ -204,22 +204,43 @@ documentMetadata (Document docPath docId issueDate title label dType pagecount l
     docId ++ "\t" ++ docPath ++ "\t" ++ issueDate ++ "\t" ++ title ++ "\t" ++ label ++ "\t" ++ dType ++ "\t" ++ pagecount ++ "\t" ++ (show $ length pagenames) ++ "\t" ++ language ++ "\t" ++ textcode
 
 documentVertXML :: (String -> [Token]) -> Document -> String
-documentVertXML analyze (Document docPath docId issueDate title label dType pagecount language textcode pages _) = 
+documentVertXML analyze (Document docPath docId issueDate title label dType pagecount language textcode pages pagenames) = 
     "<doc id=\"" ++ docId ++ "\" " ++
     "path=\"" ++ docPath ++ "\" " ++
     "date=\"" ++ issueDate ++ "\" " ++
     "title=\"" ++ title ++ "\" " ++
-    "label=\"" ++ label ++ "\" " ++
-    "label_lowercase=\"" ++ map toLower label ++ "\" " ++
+    "label_original=\"" ++ label ++ "\" " ++
+    "label=\"" ++ map toLower label ++ "\" " ++
     "type=\"" ++ dType ++ "\" "++
     "pages=\"" ++ pagecount ++ "\" "++
+    "realpages=\"" ++ (show $ length pagenames) ++ "\" " ++
     "language=\"" ++ language ++ "\" " ++
     "textcode=\"" ++ textcode ++ "\">\n" ++
-    unlines (map (pageVertXML (if language == "lav" then analyze else nonLVAnalyze)) pages) ++
+    unlines (filter ((/=) "") (map (pageVertXML (if language == "lav" then analyze else nonLVAnalyze)) pages)) ++
     "</doc>\n"
 
+documentVertXML_T :: (String -> [Token_T]) -> Document -> T.Text
+documentVertXML_T analyze (Document docPath docId issueDate title label dType pagecount language textcode pages pagenames) = 
+    (T.pack ("<doc id=\"" ++ docId ++ "\" " ++
+    "path=\"" ++ docPath ++ "\" " ++
+    "date=\"" ++ issueDate ++ "\" " ++
+    "title=\"" ++ title ++ "\" " ++
+    "label_original=\"" ++ label ++ "\" " ++
+    "label=\"" ++ map toLower label ++ "\" " ++
+    "type=\"" ++ dType ++ "\" "++
+    "pages=\"" ++ pagecount ++ "\" "++
+    "realpages=\"" ++ (show $ length pagenames) ++ "\" " ++
+    "language=\"" ++ language ++ "\" " ++
+    "textcode=\"" ++ textcode ++ "\">\n")) `T.append`
+    (T.unlines (filter ((/=) "") (map (pageVertXML_T (if language == "lav" then analyze else nonLVAnalyze_T)) pages))) `T.append`
+    (T.pack "</doc>\n")
+
+documentStanfordVert :: (String -> [Token_T]) -> Document -> T.Text
+documentStanfordVert analyze (Document docPath docId issueDate title label dType pagecount language textcode pages pagenames) = 
+    T.unlines (filter ((/=) "") (map (pageStanfordVert (if language == "lav" then analyze else nonLVAnalyze_T)) pages))
+
 documentTagSoupXML :: (String -> [Token]) -> Document -> String
-documentTagSoupXML analyze (Document docPath docId issueDate title label dType pagecount language textcode pages _) =
+documentTagSoupXML analyze (Document docPath docId issueDate title label dType pagecount language textcode pages pagenames) =
     "<doc id=\"" ++ docId ++ "\" " ++
     "path=\"" ++ docPath ++ "\" " ++
     "date=\"" ++ issueDate ++ "\" " ++
@@ -227,7 +248,7 @@ documentTagSoupXML analyze (Document docPath docId issueDate title label dType p
     "label=\"" ++ label ++ "\" " ++
     "type=\"" ++ dType ++ "\" " ++
     "pages=\"" ++ pagecount ++ "\" " ++
-    "realpages=\"" ++ (show $ length pages) ++ "\" " ++
+    "realpages=\"" ++ (show $ length pagenames) ++ "\" " ++
     "language=\"" ++ language ++ "\" " ++
     "textcode=\"" ++ textcode ++ "\">\n" ++
     unlines (map (pageTagSoupXML analyze) pages) ++

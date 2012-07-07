@@ -13,8 +13,16 @@ import Text.JSON
 import Text.ParserCombinators.Parsec as Parsec
 import qualified Morphology 
 import System.IO.Unsafe
+import Control.Monad
+import System.Environment
 
-includeTag = False
+data Task = PrepareTrainData | PrepareTestData deriving (Show, Eq)
+
+defaultTask = "train_data"
+
+oldFiles = ["1861 Latviešu Avīzes.xml","1882 Arājs.xml","1928 Atpūta.xml"]
+trainFiles = oldFiles ++ ["1935 Mūzikas Apskats.xml","1942 Austrumu apgabala raidītāju grupa.xml","1988 Padomju Jaunatne.xml","2007 Dadzis.xml","G 1934 Madona.xml","G 1966 Oskars Kalpaks.xml","G 2005 Ugāles Baznīca.xml"]
+testFiles = ["1999 Zīlīte.xml", "G 1998 Kārlis Ulmanis.xml", "1918 Baltijas Ziņas.xml"]
 
 getTag :: [NERTag] -> String
 getTag [] = "O"
@@ -24,13 +32,19 @@ getTag tags =
 		then "O"
 		else "PERSON"
 
+allowedTags = ["PERSONA","LOKACIJA","ORGANIZACIJA"]
+
 filterTags :: [NERTag] -> [NERTag]
 filterTags (x:xs) = 
-	if nerClass x == "PERSONA" then x : filterTags xs
+	if nerClass x `elem` allowedTags then x : filterTags xs
 		else filterTags xs
 filterTags x = x
 
-dataFolder = "/Users/pet/Dropbox/NER/Mans NER/"
+dataFolder = "/Users/pet/Dropbox/NER/Ex5/"
+xmlFolder = "/Users/pet/Dropbox/NER/Etalona dati/No web 15 jun/"
+stanfordFolder = "/Users/pet/Dropbox/NER/stanford-ner-2012-04-07/"
+trainFilename = stanfordFolder ++ "train_all.txt"
+compareFolder = "/Library/Webserver/Documents/compare/compare/"
 
 type XMLToken = BC.ByteString
 unpack :: XMLToken -> String
@@ -48,66 +62,89 @@ getAttributeOptional attr ((tag, text) : xs) = if (tag == attr) then (BC.toStrin
 getAttributeOptional attr [] = ""
 
 main = do
-	--mapM convertXMLFile ["G 1966 Oskars Kalpaks.xml","G 2005 Ugāles Baznīca.xml","G 1998 Kārlis Ulmanis.xml"]
-	mapM (convertXMLFile . (++) dataFolder) ["G 2005 Ugāles Baznīca.xml"]
-	--readVert $ dataFolder ++ "tagged.txt"
+	args <- getArgs
+	let task = if length args > 0 then head args else defaultTask
+	case task of
+		"train_data" -> do
+			writeFile trainFilename ""
+			mapM (convertXMLFile PrepareTrainData) trainFiles
+		"test_data" -> do
+			mapM (convertXMLFile PrepareTestData) testFiles
+		"convert_tagged" -> do
+			mapM (readVert . replace ".xml" ".tagged.txt") testFiles
+		_ -> do
+			putStrLn "Please use a task as an argument"
+			putStrLn "train_data: convert training data"
+			putStrLn "test_data: convert test data"
+			putStrLn "convert_tagged: convert ner-tagged results back"
+			return [()]
 	return ()
-	--readXML "G 1966 Oskars Kalpaks.xml"
 
-convertXMLFile filename = do
-	tokens <- readXML filename
+convertXMLFile task filename = do
 	(inp,out,err,pid) <- Morphology.pipeInit
-	--mapM (putStrLn . show) tokens
-	writeFile (replace ".xml" ".txt" filename) $ unlines $ map writeStanfordToken tokens
-	writeFile (replace ".xml" "_changed.xml" filename) $ writeNERXML tokens
-	writeFile (replace ".xml" "_bonito.xml" filename) $ writeBonitoXML (Morphology.pipeAnalyze inp out) tokens
-	writeFile (replace ".xml" "_bonito2.xml" filename) $ writeBonito2XML (Morphology.pipeAnalyze inp out) tokens
+	let analyze = (Morphology.pipeAnalyze inp out)	
+	tokens <- readXML analyze $ xmlFolder ++ filename
+	when (task == PrepareTrainData) $ appendFile trainFilename $ unlines $ map (writeStanfordToken analyze True) tokens   
+	when (task == PrepareTestData) $ writeFile (stanfordFolder ++ replace ".xml" ".txt" filename) $ unlines $ map (writeStanfordToken analyze False) tokens   
+	when (task == PrepareTestData) $ writeFile (compareFolder ++ "human/" ++ filename) $ writeNERXML tokens
+	--writeFile (replace ".xml" "_bonito.xml" filename) $ writeBonitoXML analyze tokens
+	--writeFile (replace ".xml" "_bonito2.xml" filename) $ writeBonito2XML analyze tokens
 	Morphology.pipeClose inp pid
 
-readXML filename = do
+readXML analyze filename = do
     docText <- B.readFile filename
-    return $ getText (SAX.parse defaultParseOptions $ BSL.fromChunks [docText]) 
+    return $ getText analyze (SAX.parse defaultParseOptions $ BSL.fromChunks [docText]) 
 
 -- Input format - XML used in NER markup GUI
-getText :: [SAXEvent XMLToken XMLToken] -> [TextToken]
-getText ((StartElement "p" _):xs) = getP [] True xs
-getText (_:xs) = getText xs
-getText [] = []
+getText :: (String -> [Morphology.Token]) -> [SAXEvent XMLToken XMLToken] -> [TextToken]
+getText analyze ((StartElement "p" _):xs) = getP analyze [] True xs
+getText analyze (_:xs) = getText analyze xs
+getText _ [] = []
 
-getP :: [NERTag] -> Bool -> [SAXEvent XMLToken XMLToken] -> [TextToken]
-getP tags trailingSpace ((CharacterData txt):xs ) = 
-	let (tokens, newTrailingSpace) = tagTokens (unpack txt) trailingSpace tags 
-	in tokens ++ getP tags newTrailingSpace xs
-getP tags trailingSpace ((StartElement tag attrs):xs) = getP (NERTag {nerClass = unpack tag, nerType = getAttributeOptional "type" attrs} : tags) trailingSpace xs
-getP _ trailingSpace ((EndElement "p"):xs) = Token {word = "<p/>", spaceBefore = trailingSpace, nerTags=[], lemma = "", postag = ""} : getText xs
-getP (tag:tags) trailingSpace ((EndElement tag2):xs) = getP (if nerClass tag == unpack tag2 then tags else tag:tags) trailingSpace xs
-getP tags trailingSpace (_:xs) = getP tags trailingSpace xs
-getP _ _ [] = []
+getP :: (String -> [Morphology.Token]) -> [NERTag] -> Bool -> [SAXEvent XMLToken XMLToken] -> [TextToken]
+getP analyze tags trailingSpace ((CharacterData txt):xs ) = 
+	let (tokens, newTrailingSpace) = tagTokens analyze (unpack txt) trailingSpace tags 
+	in tokens ++ getP analyze tags newTrailingSpace xs
+getP analyze tags trailingSpace ((StartElement tag attrs):xs) = getP analyze (NERTag {nerClass = unpack tag, nerType = getAttributeOptional "type" attrs} : tags) trailingSpace xs
+getP analyze _ trailingSpace ((EndElement "p"):xs) = Token {word = "<p/>", spaceBefore = trailingSpace, nerTags=[], lemma = "<p/>", postag = "-"} : getText analyze xs
+getP analyze (tag:tags) trailingSpace ((EndElement tag2):xs) = getP analyze (if nerClass tag == unpack tag2 then tags else tag:tags) trailingSpace xs
+getP analyze tags trailingSpace (_:xs) = getP analyze tags trailingSpace xs
+getP _ _ _ [] = []
 
-tagTokens :: String -> Bool -> [NERTag] -> ([TextToken], Bool)
-tagTokens text trailingSpace tags =
+tagTokens :: (String -> [Morphology.Token]) -> String -> Bool -> [NERTag] -> ([TextToken], Bool)
+tagTokens analyze text trailingSpace tags =
 	if (strip $ text) == "" 
 		then ([], trailingSpace || (length text > 0))
 		else let 
-			(token:tokens) = map (\x -> Token {word = x, spaceBefore = True, nerTags = filterTags tags, lemma = "", postag = ""}) $ words text 
+			(token:tokens) = map (\x -> (convertToken x){nerTags = filterTags tags}) $ analyze text 
+			-- TODO - normālu tokenizāciju !!! neder words text !!! un šitajos tokenos tad var ielikt uzreiz arī morfotagus!			
 			in ( token{spaceBefore = trailingSpace || startswith " " text} : tokens, endswith " " text)
 
+convertToken :: Morphology.Token -> TextToken
+convertToken token =
+	Token {word = replace " " "_" $ Morphology.word token, spaceBefore = True, nerTags = [], lemma = replace " " "_" $ Morphology.lemma token, postag = Morphology.tag token}
+
 -- Output format - vertical list of tokens, including the tags if used for training NER model.			
-writeStanfordToken :: TextToken -> String
-writeStanfordToken token = 
-	(if (spaceBefore token) || (word token == "<p/>")
+writeStanfordToken :: (String -> [Morphology.Token]) -> Bool -> TextToken -> String
+writeStanfordToken analyze includeTag token = 
+	let 
+		--mtoken = head $ analyze $ word token  --TODO - čekot vai nav tukšs saraksts
+		--mtag = Morphology.tag mtoken
+		--postag = if length mtag > 0 then [head mtag] else "-"
+		mtag = postag token
+		mpostag = if length mtag > 0 then [head mtag] else "-"
+	in (if (spaceBefore token) || (word token == "<p/>")
 		then ""
 		else if includeTag
-			then "<g/>\tO\n"
+			then "<g/>\t-\t<g/>\t-\tO\n"
 			else "<g/>\n"
 	)
-	++ if includeTag
-		then word token ++ "\t" ++ getTag (nerTags token)
-		else word token
+	++ word token ++ "\t" ++ mpostag ++ "\t" ++ lemma token ++ "\t" ++ mtag
+	++ if includeTag then "\t" ++ getTag (nerTags token) else ""
 
 -- Output format - XML used in NER markup GUI
 writeNERXML :: [TextToken] -> String
-writeNERXML tokens = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<TEXT>\n" ++ (join "\n" $ map writeP $ splitWhen (\x -> word x == "<p/>") tokens) ++ "</TEXT>"
+writeNERXML tokens = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<TEXT>\n" ++ (Data.String.Utils.join "\n" $ map writeP $ splitWhen (\x -> word x == "<p/>") tokens) ++ "</TEXT>"
 
 writeP :: [TextToken] -> String
 writeP tokens = "<p>" ++ writeXMLTokens tokens True [] ++ "</p>"
@@ -185,7 +222,7 @@ writeTagDifference2 oldTags newTags
 stanfordFile = Parsec.endBy line eol
 line = do
 	columns <- Parsec.sepBy cell (char '\t')
-	let tag = columns!!2
+	let tag = if length columns >= 2 then columns!!2 else ""
 	return Token{word = columns!!0, spaceBefore = True, nerTags = if tag == "O" then [] else [NERTag{nerClass = tag, nerType = ""}], lemma = "", postag = ""} --FIXME - tur būs arī lemmas un postagi
 cell = many (noneOf "\t\n")
 eol = char '\n'
@@ -197,12 +234,12 @@ treatNospaces (x:y:xs) = if (word x == "<g/>")
 treatNospaces x = x
 
 readVert filename = do
-    docText <- readFile filename
+    docText <- readFile $ stanfordFolder ++ filename
     case Parsec.parse stanfordFile "(unk)" docText of
     	Left err -> putStrLn $ show err
     	Right x -> do
-    		writeFile (replace ".txt" "_reviewed.xml" filename) $ writeNERXML $ treatNospaces x
-    		putStrLn $ show x
+    		writeFile (compareFolder ++ "pc/" ++ replace ".tagged.txt" ".xml" filename) $ writeNERXML $ treatNospaces x
+    		--putStrLn $ show x
     return ()
 
 -- Morphology interface
