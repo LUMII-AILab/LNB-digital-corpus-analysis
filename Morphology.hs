@@ -5,7 +5,6 @@ module Morphology
 (cheapAnalyze, nonLVAnalyze, nonLVAnalyze_T, pipeAnalyze, pipeAnalyze_T, pipeInit, pipeClose, Token(Token), word, lemma, tag, Token_T(Token_T), word_t, lemma_t, tag_t) where
 
 import Codec.Binary.UTF8.String
-import Text.JSON
 import Control.Monad
 import System.IO.Unsafe
 import System.Process
@@ -24,7 +23,6 @@ data Token_T = Token_T {word_t :: T.Text, lemma_t :: T.Text, tag_t :: T.Text}
 
 
 pipetool = "/Users/pet/Documents/java/Webservices/pipetool.sh -tab"
---pipetool = "/Users/pet/Documents/java/Webservices/pipetool.sh"
 
 cheapAnalyze :: String -> [Token]
 cheapAnalyze query = map (\x -> Token {word = x, lemma = x, tag = ""}) $ words query
@@ -38,9 +36,7 @@ nonLVAnalyze_T query = map (\x -> Token_T {word_t = T.pack x, lemma_t = T.pack x
 pipeAnalyze :: Handle -> Handle -> String -> [Token]
 pipeAnalyze inp out query = 
 	let result = unsafePerformIO $ pipeRequest inp out query -- We believe that calling the the piped Java tool is deterministic, read-only, sequence independent and with no observable side-effects.
-	in case decodeTokens result of
-		Ok tokens -> tokens
-		Error err -> error $ "Couldn't analyze \"" ++ query ++ "\" - result " ++ result ++ " error " ++ err
+	in decodeTokens result
 
 pipeAnalyze_T :: Handle -> Handle -> String -> [Token_T]
 pipeAnalyze_T inp out query = 
@@ -95,20 +91,16 @@ pipeError_T e = do
 	putStrLn $ "IOError at Java morphology piping : " ++ (show e)
 	return "[]" -- empty JSON list
 
--- Takes a JSON Object with SemTi attribute-value structures, and extracts word/tag/lemma core attributes
-decodeToken :: JSObject JSValue -> Result Token
-decodeToken token = let (!) = flip valFromObj in do
-    word <- token ! "Vārds"
-    lemma <- token ! "Pamatforma"
-    tag <- token ! "Marķējums"
-    return Token {word = word, lemma = lemma, tag = tag}
+-- maps a tab-separated word-tag-lemma string to the token structure
+decodeToken :: [String] -> Token
+decodeToken fields = Token {word = head fields, lemma = if length fields>=2 then fields !! 2 else "", tag = if length fields>=1 then fields !! 1 else "" }
 
 decodeToken_T :: [T.Text] -> Token_T
 decodeToken_T fields = Token_T {word_t = head fields, lemma_t = if length fields>=2 then fields !! 2 else "", tag_t = if length fields>=1 then fields !! 1 else "" }
 
 -- Does the same for a whole array of tokens
-decodeTokens :: String -> Result [Token]
-decodeTokens = Text.JSON.decode >=> mapM decodeToken
+decodeTokens :: String -> [Token]
+decodeTokens text = map decodeToken $ splitEvery 3 $ splitOn "\t" text
 
 decodeTokens_T :: T.Text -> [Token_T]
 decodeTokens_T text = map decodeToken_T $ splitEvery 3 $ T.splitOn "\t" text
